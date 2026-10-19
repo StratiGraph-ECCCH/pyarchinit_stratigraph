@@ -1,0 +1,21 @@
+# Sync fork twice a week at 01:00 UTC
+name: Sync fork
+
+on:
+  schedule:
+    - cron: "0 1 * * 2,5"
+  workflow_dispatch: # on button click
+
+# In order to grant merging permissions to the action
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Uses the GitHub cli (https://cli.github.com/manual/gh_repo_sync)
+    # available on the runner machine
+    steps:
+      - run: gh repo sync ${{ github.repository }} --branch Stratigraph_00001
+        env:
+          GH_TOKEN: ${{ github.token }}
