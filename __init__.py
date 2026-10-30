@@ -32,7 +32,8 @@ from typing import Dict, List, Optional, Set
 # Its compiled packages load only in the Python that installed them: one
 # built for another Python (QGIS 3's 3.9 in a QGIS 4 profile) is parked
 # aside and a fresh one is started (modules/utility/python_env.py).
-from .modules.utility.python_env import (drop_ext_numpy, ensure_ext_libs, note_numpy_attempt,
+from .modules.utility.python_env import (drop_ext_numpy, ensure_ext_libs, mac_fallback_pythons, mac_qgis_apps,
+                                         note_numpy_attempt, with_qgis_apps,
                                          numpy_constraint_args, numpy_repairs, pip_interpreter,
                                          probe, prune_stale_dists, write_marker)
 
@@ -83,8 +84,11 @@ os.environ.setdefault('PYARCHINIT_WORKSPACE_DIR',
 QGIS_PATHS = {
     'standard': '/Applications/QGIS.app/Contents/MacOS',
     'ltr': '/Applications/QGIS-LTR.app/Contents/MacOS',
-    'qgis4': '/Applications/QGIS-final-4_0_0.app/Contents/MacOS',
 }
+# ogni altro QGIS installato (QGIS 4 di qualunque versione, in /Applications
+# o in ~/Applications): prima c'era una sola versione di QGIS 4 scritta fissa
+if platform.system() == 'Darwin':
+    QGIS_PATHS = with_qgis_apps(QGIS_PATHS, mac_qgis_apps())
 
 # Constants for OpenCV paths on MacOS
 OPENCV_PATHS = {
@@ -293,14 +297,8 @@ class PackageManager:
                 found.append(PackageManager.get_osgeo4w_python())
             found.append(PackageManager.get_windows_qgis_python())
         elif platform.system() == 'Darwin':
-            names = ('python3', 'python%d.%d' % sys.version_info[:2])
-            for qgis_base in QGIS_PATHS.values():
-                contents_dir = os.path.dirname(qgis_base)
-                for subdir in (os.path.join(qgis_base, 'bin'),
-                               os.path.join(contents_dir, 'Resources', 'python', 'bin'),
-                               os.path.join(contents_dir, 'Frameworks', 'Python.framework',
-                                            'Versions', 'Current', 'bin')):
-                    found += [os.path.join(subdir, n) for n in names]
+            # ogni QGIS installato; per QGIS 4 il lanciatore Contents/MacOS/python
+            found += mac_fallback_pythons(list(QGIS_PATHS.values()))
             found += ['/usr/bin/python3', '/opt/homebrew/bin/python3', '/usr/local/bin/python3']
         return found
 
@@ -814,21 +812,40 @@ class FontManager:
 
     @staticmethod
     def install_fonts(splash=None) -> None:
-        """Install required fonts for the system."""
+        """Cambria (le schede in PDF) si copia da sé nei font dell'utente
+        (macOS, Linux), coi nomi che cerca ReportLab: a ogni avvio si rifà
+        solo quello che manca o non è un font intero. L'avviso con la
+        cartella da aprire resta solo se la copia non è riuscita."""
+        fonts_dir = None
+        try:
+            from .modules.utility.font_install import cambria_installed, install_cambria, user_fonts_dir
+            fonts_dir = user_fonts_dir()
+            if fonts_dir:
+                copiati = install_cambria(
+                    os.path.join(PYARCHINIT_HOME, 'bin') if PYARCHINIT_HOME else None, fonts_dir,
+                    zip_path=os.path.join(os.path.dirname(__file__), 'resources', 'dbfiles', 'cambria.zip'))
+                if copiati:
+                    print(f"pyArchInit: Cambria installato in {fonts_dir} ({', '.join(copiati)})")
+                    if platform.system() == "Linux":
+                        try:            # la cache di fontconfig, senza aspettarla
+                            subprocess.Popen(["fc-cache", "-f", fonts_dir],
+                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        except OSError:
+                            pass
+                if cambria_installed(fonts_dir):
+                    return
+        except Exception as e:                              # noqa: BLE001 — mai bloccare l'avvio
+            print(f"pyArchInit: Cambria non installato: {e}")
         if platform.system() == "Darwin":
-            location = os.path.expanduser("~/Library/Fonts")
-            if not os.path.exists(location + '/cambria.ttc'):
-                # in front of the splash (always on top) and of QGIS
-                result = exec_on_top(QMessageBox(
-                    QMessageBox.Icon.Warning, 'Pyarchinit',
-                    "INFO: The Cambria font does not appear to be installed. "
-                    "Click Ok to install it\nand then double click on cambria.*\n"
-                    "After that, reload the plugin",
-                    QMessageBox.StandardButton.Ok), splash)
-                if result == QMessageBox.StandardButton.Ok:
-                    home = os.environ['PYARCHINIT_HOME']
-                    path = f"{home}{os.sep}bin"
-                    subprocess.Popen(["open", path])
+            # in front of the splash (always on top) and of QGIS
+            result = exec_on_top(QMessageBox(
+                QMessageBox.Icon.Warning, 'Pyarchinit',
+                "INFO: The Cambria font does not appear to be installed. "
+                "Click Ok to install it\nand then double click on cambria.*\n"
+                "After that, reload the plugin",
+                QMessageBox.StandardButton.Ok), splash)
+            if result == QMessageBox.StandardButton.Ok:
+                subprocess.Popen(["open", os.path.join(PYARCHINIT_HOME, "bin")])
 
 
 def initialize_environment(splash=None) -> None:

@@ -5,6 +5,49 @@
 
 ---
 
+## [fix] - 2026-10-27 — QGIS 3.44 per macOS: mod_spatialite si trova nel QGIS che gira, anche senza Homebrew — 5.13.140-alpha
+
+> Branch `Stratigraph_00001`. Suite **2570 verdi** sul QGIS 3.44.15 nuovo di questo Mac (+13 test); i 35 falliti e 16 errori rimasti sono gli stessi sul commit di prima e vengono dall'ambiente (in `ext_libs` del QGIS nuovo manca ancora `s3dgraphy`, test che lanciano un Python senza PYTHONHOME). / QGIS 3.44 on macOS: mod_spatialite is found inside the running QGIS, also without Homebrew.
+
+#### Fixed / Corretto
+- 🇮🇹 **IT**: un utente Mac con QGIS 3.44.15 (il pacchetto nuovo di qgis.org, Python 3.12 in `Contents/Frameworks`) non apriva nessun database SQLite: «Could not find mod_spatialite library». Il QGIS 3.44 mette l'estensione in `Contents/Frameworks/mod_spatialite.so`; il plugin lì cercava solo i `.dylib` e trovava `libspatialite.dylib`, che è la libreria e non l'estensione (`symbol not found: sqlite3_spatialite_init`). Funzionava solo a chi aveva Spatialite di Homebrew (`/opt/homebrew/lib/mod_spatialite.dylib`), che QGIS ha il permesso di caricare.
+  - **Un modulo solo** (`modules/utility/spatialite_loader.py`, nuovo): `spatialite_candidates` prova prima il QGIS che gira (da `sys.prefix` e `sys.executable`: `Contents/Frameworks`, `Contents/MacOS/lib` dei QGIS vecchi), poi gli altri QGIS installati in `/Applications` e `~/Applications`, poi Homebrew e MacPorts, per ultimo il nome nudo; ogni file una volta sola, `libspatialite` mai. `load_spatialite` carica, ricorda l'ultimo buono (le connessioni dopo la prima non rifanno la ricerca) e, se nessuno va, dice cosa ha provato e l'ultimo errore. Windows (`mod_spatialite.dll`) e Linux (`mod_spatialite.so`) come prima.
+  - Lo usano tutti i punti che lo caricavano ciascuno a modo suo: `pyarchinit_db_manager` (connessione e tabella dei punti UT), `database_sync`, `pyarchinit_db_update` (due riparazioni), finestra di configurazione, `response_sql` (su Windows caricava `.so`: `sys.platform` non vale mai `'win'`), import da QField, viste spaziali della scheda US.
+  - **Meglio il Spatialite di QGIS che quello di Homebrew**: Homebrew porta un suo SQLite e librerie sue. Caricato in una connessione e scaricato alla chiusura, lascia gestori di `fork` che puntano a memoria non più valida: il primo `subprocess` dopo va in crash (visto nella suite).
+  - **Dalla revisione**: `Gis_Time_controller` all'import, se psutil manca, lanciava `pip` con `/Applications/QGIS.app/Contents/MacOS/bin/python3`, che nel 3.44 non c'è (`FileNotFoundError`): ora niente installazione lì (psutil è nei requisiti, la installa il plugin all'avvio), senza psutil manca solo «ferma dot». La conversione dottoxml della scheda US usa il Python del QGIS che gira, con la sua PYTHONHOME.
+- 🇬🇧 **EN**: on the new QGIS 3.44 macOS bundle, mod_spatialite lives in `Contents/Frameworks/mod_spatialite.so`, which the plugin never looked for: SQLite databases failed to open unless Homebrew's SpatiaLite was installed. A single loader (`modules/utility/spatialite_loader.py`) now finds it in the running QGIS first, then other installed QGIS apps, then Homebrew/MacPorts, then the bare name; every place that loaded SpatiaLite uses it. No more hardcoded `Contents/MacOS/bin/python3` in the Time Controller and in the dottoxml conversion.
+
+#### Test / Verifica
+- 🇮🇹 **IT**: +13 test visti rossi prima (`tests/utility/test_spatialite_qgis.py`: struttura 3.44 e vecchia, ordine, doppioni, nome nudo, errore che dice cosa ha provato, ultimo buono senza rifare la ricerca, Python senza estensioni, caricamento vero del `mod_spatialite.so` del QGIS 3.44 di questo Mac, nessun `MacOS/bin/python3` scritto fisso). I test che caricavano Spatialite da elenchi propri passano dal modulo; il finto thread della narrativa ha `deleteLater` (il PyQt nuovo chiude il processo per un'eccezione in uno slot).
+- 🇬🇧 **EN**: 13 new tests, all seen failing first; test helpers load SpatiaLite through the new module.
+
+#### Documentation / Documentazione
+- 🇮🇹 **IT**: `metadata.txt` 5.13.140-alpha. Nessun tutorial da cambiare (niente di visibile).
+- 🇬🇧 **EN**: no tutorial change needed.
+
+---
+
+## [fix] - 2026-10-27 — Installazione su Mac: si trova qualunque QGIS (anche ogni versione di QGIS 4) e il font Cambria si installa da solo — 5.13.139-alpha
+
+> Branch `Stratigraph_00001`. Suite **2615 verdi** (0 falliti, 0 errori, 3 saltati, 1 xfail; +14 test). / Installing on macOS: any QGIS app is found (every QGIS 4 version too) and the Cambria font installs itself.
+
+#### Fixed / Corretto
+- 🇮🇹 **IT**: Enzo, 27 ottobre 2026: «si deve trovare qualsiasi versione di qgis4» e «anche i font Cambria li dovrebbe installare in automatico».
+  - **Ogni QGIS installato** (`python_env.mac_qgis_apps`, `with_qgis_apps`): l'installatore cercava QGIS 4 solo in `/Applications/QGIS-final-4_0_0.app`; ora ogni `QGIS*.app` in `/Applications` e in `~/Applications` (QGIS, LTR, QGIS 4 di qualunque versione; due con lo stesso nome restano tutti e due). Il Python di ripiego di QGIS 4 è il lanciatore `Contents/MacOS/python`, che imposta PYTHONHOME da sé (`mac_fallback_pythons`; il `python3.12` lì accanto, lanciato nudo, non parte).
+  - **Cambria da solo** (`modules/utility/font_install.py`, nuovo): prima su macOS il plugin apriva `~/pyarchinit_5/bin` e chiedeva un doppio clic su ogni `cambria.*`; ora i file si copiano nei font dell'utente (`~/Library/Fonts`, su Linux `~/.local/share/fonts` con `fc-cache` lanciato senza aspettarlo), senza permessi di amministratore, da `~/pyarchinit_5/bin` o dallo zip del plugin. Dalla revisione: coi nomi esatti che cerca ReportLab (`Cambria.ttc` maiuscolo: su Linux contava, col nome dello zip le schede in PDF non partivano), installato solo se ci sono tutti e quattro i file (`Cambria.ttc`, `cambriab.ttf`, `cambriai.ttf`, `cambriaz.ttf`) interi e veri font, copia atomica da un `.part` (un disco pieno a metà non lascia più un file troncato che rompe la scheda US per sempre), nessun errore che blocchi il caricamento del plugin. L'avviso di prima resta solo se la copia non riesce. Windows invariato (lì un font dell'utente va anche registrato).
+  - **Riestrazioni a ogni avvio** (c'era da prima): `rscripts.zip` e `cambria.zip` hanno i file sciolti, e il controllo cercava cartelle `rscripts`/`cambria` che non esistono mai: script R e font si riestraevano in `~/pyarchinit_5/bin` a ogni avvio.
+- 🇬🇧 **EN**: any QGIS app is discovered on macOS (every QGIS 4 version, also in ~/Applications; QGIS 4's `Contents/MacOS/python` launcher as fallback interpreter); Cambria installs itself into the user fonts folder (macOS, Linux) with ReportLab's exact file names, a complete-and-valid check, atomic copies and no startup-blocking errors; rscripts.zip and cambria.zip are no longer re-extracted at every start.
+
+#### Test / Verifica
+- 🇮🇹 **IT**: +14 test visti rossi prima (QGIS trovati, nomi doppi, lanciatore di QGIS 4 che parte davvero su questo Mac, Cambria: nomi esatti, cartella con un solo file, file vuoti o rovinati, copia interrotta, zip rotto, zip vero aperto da ReportLab, niente percorsi relativi, zip non riestratti).
+- 🇬🇧 **EN**: 14 new tests, all seen failing first.
+
+#### Documentation / Documentazione
+- 🇮🇹 **IT**: `metadata.txt` 5.13.139-alpha. I tutorial dicevano già che il plugin installa Cambria da sé.
+- 🇬🇧 **EN**: no tutorial change needed.
+
+---
+
 ## [fix] - 2026-10-26 — Le librerie installate da pyArchInit rispettano il numpy di QGIS: su QGIS 3.40 LTR (Windows) le schede US e Reperti non si aprivano più (issue #666) — 5.13.138-alpha
 
 > Branch `Stratigraph_00001`. Suite **2601 verdi** (0 falliti, 0 errori, 3 saltati, 1 xfail; +10 test). / Libraries installed by pyArchInit now respect QGIS's numpy: on QGIS 3.40 LTR (Windows) the US and Finds forms no longer opened (issue #666).

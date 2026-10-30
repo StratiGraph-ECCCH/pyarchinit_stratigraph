@@ -451,3 +451,53 @@ def drop_ext_numpy(ext_dir, path=None) -> list:
             except OSError:
                 pass
     return tolte
+
+
+def mac_qgis_apps(roots=("/Applications", "~/Applications")) -> list:
+    """Le cartelle ``<app>/Contents/MacOS`` di ogni QGIS installato su macOS
+    (QGIS.app, QGIS-LTR.app, QGIS 4 di qualunque versione: QGIS-final-4_2_2.app,
+    «QGIS 4.app»…), in /Applications e in ~/Applications."""
+    trovati = []
+    for radice in roots:
+        radice = os.path.expanduser(radice)
+        try:
+            voci = sorted(os.listdir(radice))
+        except OSError:
+            continue
+        for voce in voci:
+            if voce.lower().startswith("qgis") and voce.lower().endswith(".app"):
+                macos = os.path.join(radice, voce, "Contents", "MacOS")
+                if os.path.isdir(macos) and macos not in trovati:
+                    trovati.append(macos)
+    return trovati
+
+
+def with_qgis_apps(paths: dict, apps) -> dict:
+    """``paths`` più i QGIS di ``apps``, ognuno sotto il nome della sua app
+    o, se quel nome c'è già (lo stesso QGIS in /Applications e in
+    ~/Applications), sotto il percorso intero: nessuno si perde."""
+    out = dict(paths)
+    for macos in apps:
+        if macos in out.values():
+            continue
+        nome = os.path.basename(os.path.dirname(os.path.dirname(macos)))
+        out[nome if nome not in out else macos] = macos
+    return out
+
+
+def mac_fallback_pythons(apps, version=None) -> list:
+    """I Python da provare dentro le app di QGIS. Prima il lanciatore
+    ``Contents/MacOS/python`` di QGIS 4, che imposta PYTHONHOME da sé (il
+    ``python3.12`` lì accanto, lanciato nudo, non parte); poi i posti di
+    QGIS 3."""
+    version = version or tuple(sys.version_info[:2])
+    nomi = ("python3", "python%d.%d" % tuple(version[:2]))
+    trovati = []
+    for macos in apps:
+        contents = os.path.dirname(macos)
+        trovati.append(os.path.join(macos, "python"))
+        for cartella in (os.path.join(macos, "bin"),
+                         os.path.join(contents, "Resources", "python", "bin"),
+                         os.path.join(contents, "Frameworks", "Python.framework", "Versions", "Current", "bin")):
+            trovati += [os.path.join(cartella, n) for n in nomi]
+    return trovati
